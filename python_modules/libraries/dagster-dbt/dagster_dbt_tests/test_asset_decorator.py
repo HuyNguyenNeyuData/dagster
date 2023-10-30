@@ -14,6 +14,7 @@ from dagster import (
     LastPartitionMapping,
     PartitionMapping,
     PartitionsDefinition,
+    TimeWindowPartitionMapping,
     asset,
 )
 from dagster._core.definitions.utils import DEFAULT_IO_MANAGER_KEY
@@ -333,7 +334,14 @@ def test_with_asset_key_replacements() -> None:
     }
 
 
-@pytest.mark.parametrize("partition_mapping", [None, LastPartitionMapping()])
+@pytest.mark.parametrize(
+    "partition_mapping",
+    [
+        None,
+        LastPartitionMapping(),
+        TimeWindowPartitionMapping(start_offset=-1, end_offset=-1),
+    ],
+)
 def test_with_partition_mappings(partition_mapping: Optional[PartitionMapping]) -> None:
     class CustomizedDagsterDbtTranslator(DagsterDbtTranslator):
         @classmethod
@@ -345,13 +353,17 @@ def test_with_partition_mappings(partition_mapping: Optional[PartitionMapping]) 
     @dbt_assets(
         manifest=test_dagster_metadata_manifest,
         dagster_dbt_translator=CustomizedDagsterDbtTranslator(),
+        partitions_def=DailyPartitionsDefinition(start_date="2023-10-01"),
     )
     def my_dbt_assets():
         ...
 
-    assert my_dbt_assets.keys_by_input_name
-    for input_asset_key in my_dbt_assets.keys_by_input_name.values():
+    assert my_dbt_assets.dependency_keys
+    for input_asset_key in my_dbt_assets.dependency_keys:
         assert my_dbt_assets.get_partition_mapping(input_asset_key) == partition_mapping
+
+    if partition_mapping:
+        assert my_dbt_assets.get_partition_mapping(AssetKey("customers")) == partition_mapping
 
 
 def test_with_description_replacements() -> None:
