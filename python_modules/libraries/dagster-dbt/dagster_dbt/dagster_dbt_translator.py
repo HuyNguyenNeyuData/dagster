@@ -5,6 +5,7 @@ from dagster import (
     AssetKey,
     AutoMaterializePolicy,
     FreshnessPolicy,
+    PartitionMapping,
     _check as check,
 )
 from dagster._annotations import public
@@ -114,6 +115,29 @@ class DagsterDbtTranslator:
                         return asset_key
         """
         return default_asset_key_fn(dbt_resource_props)
+
+    @classmethod
+    @public
+    def get_partition_mapping(
+        cls, dbt_resource_props: Mapping[str, Any]
+    ) -> Optional[PartitionMapping]:
+        """A function that takes a dictionary representing properties of a dbt resource, and
+        returns the Dagster partition mapping that represents that resource.
+
+        Note that a dbt resource is unrelated to Dagster's resource concept, and simply represents
+        a model, seed, snapshot or source in a given dbt project. You can learn more about dbt
+        resources and the properties available in this dictionary here:
+        https://docs.getdbt.com/reference/artifacts/manifest-json#resource-details
+
+        This method can be overridden to provide a custom partition mapping for a dbt resource.
+
+        Args:
+            dbt_resource_props (Mapping[str, Any]): A dictionary representing the dbt resource.
+
+        Returns:
+            Optional[PartitionMapping]: The Dagster partition mapping for the dbt resource.
+        """
+        return None
 
     @classmethod
     @public

@@ -24,6 +24,7 @@ from dagster import (
 )
 from dagster._utils.warnings import (
     disable_dagster_warnings,
+    experimental_warning,
 )
 
 from .asset_utils import (
@@ -378,12 +379,23 @@ def get_dbt_multi_asset_args(
             for parent_unique_id in parent_unique_ids:
                 parent_resource_props = dbt_nodes[parent_unique_id]
                 parent_asset_key = dagster_dbt_translator.get_asset_key(parent_resource_props)
+                parent_partition_mapping = dagster_dbt_translator.get_partition_mapping(
+                    parent_resource_props
+                )
+
+                if parent_partition_mapping:
+                    experimental_warning("DagsterDbtTranslator.get_partition_mapping")
 
                 # Add this parent as an internal dependency
                 output_internal_deps.add(parent_asset_key)
 
                 # Mark this parent as an input if it has no dependencies
                 if parent_unique_id not in dbt_unique_id_deps:
-                    deps.add(AssetDep(asset=parent_asset_key))
+                    deps.add(
+                        AssetDep(
+                            asset=parent_asset_key,
+                            partition_mapping=parent_partition_mapping,
+                        )
+                    )
 
     return list(deps), outs, internal_asset_deps, check_specs
