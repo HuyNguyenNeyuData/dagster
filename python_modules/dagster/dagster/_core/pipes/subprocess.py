@@ -1,3 +1,4 @@
+import os
 from subprocess import Popen
 from typing import Mapping, Optional, Sequence, Union
 
@@ -29,8 +30,9 @@ class _PipesSubprocess(PipesClient):
     a temp file, and structured messages are read from from a temp file.
 
     Args:
-        env (Optional[Mapping[str, str]]): An optional dict of environment variables to pass to the
-            subprocess.
+        env (Optional[Mapping[str, str]]): The base environment variables to pass to the
+            subprocess, over layed with those set in the run call. Defaults to None,
+            inheriting the environment variables of the current process.
         cwd (Optional[str]): Working directory in which to launch the subprocess command.
         context_injector (Optional[PipesContextInjector]): A context injector to use to inject
             context into the subprocess. Defaults to :py:class:`PipesTempFileContextInjector`.
@@ -45,9 +47,9 @@ class _PipesSubprocess(PipesClient):
         context_injector: Optional[PipesContextInjector] = None,
         message_reader: Optional[PipesMessageReader] = None,
     ):
-        self.env = check.opt_mapping_param(env, "env", key_type=str, value_type=str)
-        self.cwd = check.opt_str_param(cwd, "cwd")
-        self.context_injector = (
+        self._base_env = check.opt_nullable_mapping_param(env, "env", key_type=str, value_type=str)
+        self._cwd = check.opt_str_param(cwd, "cwd")
+        self._context_injector = (
             check.opt_inst_param(
                 context_injector,
                 "context_injector",
@@ -55,7 +57,7 @@ class _PipesSubprocess(PipesClient):
             )
             or PipesTempFileContextInjector()
         )
-        self.message_reader = (
+        self._message_reader = (
             check.opt_inst_param(
                 message_reader,
                 "message_reader",
@@ -84,7 +86,8 @@ class _PipesSubprocess(PipesClient):
             command (Union[str, Sequence[str]]): The command to run. Will be passed to `subprocess.Popen()`.
             context (OpExecutionContext): The context from the executing op or asset.
             extras (Optional[PipesExtras]): An optional dict of extra parameters to pass to the subprocess.
-            env (Optional[Mapping[str, str]]): An optional dict of environment variables to pass to the subprocess.
+            env (Optional[Mapping[str, str]]): An optional dict of environment variables to pass to the
+                subprocess, atop those set at the client level.
             cwd (Optional[str]): Working directory in which to launch the subprocess command.
 
         Returns:
@@ -93,17 +96,17 @@ class _PipesSubprocess(PipesClient):
         """
         with open_pipes_session(
             context=context,
-            context_injector=self.context_injector,
-            message_reader=self.message_reader,
+            context_injector=self._context_injector,
+            message_reader=self._message_reader,
             extras=extras,
         ) as pipes_session:
             process = Popen(
                 command,
-                cwd=cwd or self.cwd,
+                cwd=cwd or self._cwd,
                 env={
-                    **pipes_session.get_bootstrap_env_vars(),
-                    **self.env,
+                    **(self._base_env if self._base_env is not None else os.environ),
                     **(env or {}),
+                    **pipes_session.get_bootstrap_env_vars(),
                 },
             )
             process.wait()

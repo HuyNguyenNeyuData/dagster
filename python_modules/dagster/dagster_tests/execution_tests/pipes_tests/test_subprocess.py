@@ -47,6 +47,7 @@ from dagster._core.pipes.utils import (
     open_pipes_session,
 )
 from dagster._core.storage.asset_check_execution_record import AssetCheckExecutionRecordStatus
+from dagster._utils.env import environ
 from dagster_aws.pipes import PipesS3ContextInjector, PipesS3MessageReader
 from moto.server import ThreadedMotoServer
 
@@ -536,3 +537,55 @@ def test_pipes_no_close():
         assert len(pipes_msgs) == 2
         assert "successfully opened" in pipes_msgs[0]
         assert "did not receive closed message" in pipes_msgs[1]
+
+
+def test_subprocess_env_precedence():
+    def script_fn():
+        import os
+
+        from dagster_pipes import open_dagster_pipes
+
+        with open_dagster_pipes() as context:
+            context.report_asset_materialization(
+                metadata={
+                    "A": os.getenv("A"),
+                    "B": os.getenv("B"),
+                    "C": os.getenv("C"),
+                },
+            )
+
+    @asset
+    def env_test(context, pipes_client: PipesSubprocessClient):
+        with temp_script(script_fn) as script_path:
+            cmd = [_PYTHON_EXECUTABLE, script_path]
+            return pipes_client.run(
+                env={"C": "callsite"},
+                command=cmd,
+                context=context,
+            ).get_results()
+
+    # test that client vals override outer env
+    with environ({"A": "parent", "B": "parent"}):
+        result = materialize(
+            [env_test],
+            resources={"pipes_client": PipesSubprocessClient(env={"A": "client"})},
+        )
+        assert result.success
+        mat_evts = result.get_asset_materialization_events()
+        assert len(mat_evts) == 1
+        assert mat_evts[0].materialization.metadata["A"].value == "client"
+        # setting base env on client prevents parent env inheritance
+        assert mat_evts[0].materialization.metadata["B"].value is None
+        assert mat_evts[0].materialization.metadata["C"].value == "callsite"
+
+        # test that callsite vals override client env (and outer env not inherited)
+        result = materialize(
+            [env_test],
+            resources={"pipes_client": PipesSubprocessClient()},
+        )
+        assert result.success
+        mat_evts = result.get_asset_materialization_events()
+        assert len(mat_evts) == 1
+        assert mat_evts[0].materialization.metadata["A"].value == "parent"
+        assert mat_evts[0].materialization.metadata["B"].value == "parent"
+        assert mat_evts[0].materialization.metadata["C"].value == "callsite"
